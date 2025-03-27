@@ -8,6 +8,7 @@ import { APIError, NetboxPayloads, NetboxResponses } from './util/S2types.js';
 import { buildCommandXml, parseFullXml } from './util/xml.js';
 import { request, Agent } from 'undici';
 import { clearInterval, setInterval } from 'node:timers';
+import { processStreamResponse } from './util/streamEvents.js';
 
 const allowSelfSigned = new Agent({ connect: { rejectUnauthorized: false } });
 
@@ -17,17 +18,33 @@ interface S2State {
 	events: Set<string>;
 	activeEvents: Set<string>;
 	activeOutputs: Set<number>;
+	activeFloorSets: {
+		all: boolean;
+		2: boolean;
+		3: boolean;
+		4: boolean;
+		b: boolean;
+	};
 }
 
 export class ModuleInstance extends InstanceBase<S2Config> {
 	public config: Required<S2Config> | null = null; // Setup in init()
 	private sessionId: string | undefined = undefined;
 	private pingInterval: NodeJS.Timeout | undefined = undefined;
+	private authError: boolean = false;
+	private streamAbortController: AbortController | null = null;
 	public state: S2State = {
 		outputs: {},
 		events: new Set(),
 		activeEvents: new Set(),
 		activeOutputs: new Set(),
+		activeFloorSets: {
+			2: false,
+			3: false,
+			4: false,
+			b: false,
+			all: false,
+		},
 	};
 
 	public constructor(internal: unknown) {
@@ -47,6 +64,8 @@ export class ModuleInstance extends InstanceBase<S2Config> {
 	}
 
 	public async configUpdated(config: S2Config): Promise<void> {
+		this.streamAbortController?.abort();
+		this.streamAbortController = null;
 		if (
 			!config.host ||
 			!config.port ||
@@ -67,12 +86,16 @@ export class ModuleInstance extends InstanceBase<S2Config> {
 			await this.login();
 		} catch (error) {
 			this.log('error', `Error Logging in during init: ${error}`);
+			if (!this.authError) {
+				setTimeout(() => void this.configUpdated(config), 10_000);
+			}
 			return;
 		}
 
 		try {
 			await this.updateEvents();
 			await this.updateOutputs();
+			await this.streamEvents();
 		} catch (error) {
 			this.log('warn', `Could not init events and outputs: ${error}`);
 		}
@@ -150,7 +173,36 @@ export class ModuleInstance extends InstanceBase<S2Config> {
 		this.setVariableDefinitions(getVariableDefinitions(this));
 	}
 
-	public async sendCommand<Command extends keyof NetboxPayloads>(
+	public async streamEvents(): Promise<void> {
+		const config = this.config;
+		if (!config) {
+			this.log('warn', 'Attempted to stream events before configured');
+			throw new Error('Not ready');
+		}
+		const xml = buildCommandXml(
+			'StreamEvents',
+			{
+				TAGNAMES: {
+					DESCNAME: {
+						FILTERS: { FILTER: ['Event activated', 'Elevator access granted'] },
+					},
+					EVTNAME: {},
+				},
+			},
+			this.sessionId,
+		);
+		this.streamAbortController = new AbortController();
+		const res = await request(`http${config.ssl ? 's' : ''}://${config.host}:${config.port}/nbws/goforms/nbapi`, {
+			method: 'POST',
+			dispatcher: config.ssl ? allowSelfSigned : undefined,
+			body: xml,
+			signal: this.streamAbortController.signal,
+		});
+
+		void processStreamResponse(res, this);
+	}
+
+	public async sendCommand<Command extends Exclude<keyof NetboxPayloads, 'StreamEvents'>>(
 		...args: NetboxPayloads[Command] extends never
 			? [command: Command, data?: undefined, retry?: boolean]
 			: [command: Command, data: NetboxPayloads[Command], retry?: boolean]
@@ -236,12 +288,14 @@ export class ModuleInstance extends InstanceBase<S2Config> {
 		this.updateStatus(InstanceStatus.Connecting);
 
 		try {
+			this.authError = false;
 			await this.sendCommand('Login', { USERNAME: config.username, PASSWORD: config.password });
 			this.pingInterval = setInterval(() => void this.ping(), config.pingInterval * 60 * 1000);
 			this.updateStatus(InstanceStatus.Ok);
 		} catch (error) {
 			if (typeof error === 'object' && error && 'authFailure' in error && error.authFailure === true) {
 				this.updateStatus(InstanceStatus.AuthenticationFailure);
+				this.authError = true;
 				throw new Error('Login Failed, check username and password');
 			}
 			this.updateStatus(InstanceStatus.UnknownError);
@@ -254,6 +308,8 @@ export class ModuleInstance extends InstanceBase<S2Config> {
 		clearInterval(this.pingInterval);
 		this.pingInterval = undefined;
 		this.sessionId = undefined;
+		this.streamAbortController?.abort();
+		this.streamAbortController = null;
 	}
 
 	private async ping() {

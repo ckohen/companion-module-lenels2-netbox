@@ -19,6 +19,7 @@ export interface NetboxPayloads {
 	Logout: never;
 	PingApp: never;
 	TriggerEvent: NetboxTriggerEventPayload;
+	StreamEvents: NetboxStreamEventsPayload;
 }
 
 export interface NetboxActivateOutputPayload {
@@ -60,6 +61,43 @@ export interface NetboxTriggerEventPayload {
 	PARTITIONID?: number;
 }
 
+export type TagElements =
+	| 'ACNAME'
+	| 'ACNUM'
+	| 'ACTIVITYID'
+	| 'ALARMPANELNAME'
+	| 'ALARMSTATENAME'
+	| 'ALARMTIMERNAME'
+	| 'ALARMTRANSITIONNAME'
+	| 'BLADESLOT'
+	| 'CDT'
+	| 'DESCNAME'
+	| 'DETAIL'
+	| 'EVTNAME'
+	| 'EVTPRIO'
+	| 'IPANELAREA'
+	| 'IPANELNAME'
+	| 'IPANELOUTPUT'
+	| 'IPANELUSER'
+	| 'IPANELZONE'
+	| 'LOCATIONNAME'
+	| 'LOGINADDRESS'
+	| 'NODEADDRESS'
+	| 'NODENAME'
+	| 'NODEUNIQUE'
+	| 'NDT'
+	| 'PARTNAME'
+	| 'PERSONNAME'
+	| 'PERSONID'
+	| 'PORTALNAME'
+	| 'RDRNAME'
+	| 'THREATNAME'
+	| 'UCBITLENGTH';
+
+export interface NetboxStreamEventsPayload {
+	TAGNAMES?: Partial<Record<TagElements, { FILTERS?: { FILTER: string[] } }>>;
+}
+
 //#region Responses
 
 export enum APIError {
@@ -78,7 +116,8 @@ export interface NetboxAPIErrorResponse {
 export type NetboxCommandResponse<InnerResponse extends NetboxResponse | never = never> =
 	| NetboxCommandSuccessResponse<InnerResponse>
 	| NetboxCommandFailResponse
-	| NetboxCommandNotFoundResponse;
+	| NetboxCommandNotFoundResponse
+	| NetboxStreamEventsResponse;
 
 export interface NetboxCommandResponseBase {
 	command: string;
@@ -120,6 +159,7 @@ export interface NetboxResponses {
 	Logout: never;
 	PingApp: never;
 	TriggerEvent: never;
+	StreamEvents: NetboxStreamEventsResponse;
 }
 
 export interface NetboxActivateOutputResponse {
@@ -156,4 +196,10 @@ export interface NetboxListEventsResponse {
 		EVENT: NetboxEvent[] | NetboxEvent;
 	};
 	NEXTKEY: number;
+}
+
+export interface NetboxStreamEventsResponse {
+	command: 'StreamEvents';
+	EVENT: Partial<Record<TagElements, string>>;
+	CODE: never;
 }

@@ -9,6 +9,7 @@ import { S2AdvancedFeedback, S2BooleanFeedback, S2Feedback, TypeOptions } from '
 import { DeepImmutable } from '../actions/_types.js';
 import { eventState } from './eventState.js';
 import { outputState } from './outputState.js';
+import { floorSet } from './floorSet.js';
 
 export function createS2BooleanFeedback<const Options extends DeepImmutable<SomeCompanionFeedbackInputField[]>>(
 	feedback: Omit<S2BooleanFeedback<Options>, 'options' | 'type'>,
@@ -25,7 +26,7 @@ export function createS2AdvancedFeedback<const Options extends DeepImmutable<Som
 }
 
 export function getFeedbacks(companionModule: ModuleInstance): CompanionFeedbackDefinitions {
-	return convertFeedbacks(companionModule, { eventState, outputState });
+	return convertFeedbacks(companionModule, { eventState, outputState, floorSet });
 }
 
 function convertFeedbacks(
